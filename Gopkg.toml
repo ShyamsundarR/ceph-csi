@@ -64,3 +64,11 @@
 [[prune.project]]
   name = "github.com/kubernetes-csi/external-snapshotter"
   non-go = false
+
+[[constraint]]
+  name = "github.com/grpc-ecosystem/go-grpc-prometheus"
+  version = "1.2.0"
+
+[[constraint]]
+  name = "github.com/prometheus/client_golang"
+  version = "1.0.0"

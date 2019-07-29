@@ -18,10 +18,13 @@ package csicommon
 
 import (
 	"net"
+	"net/http"
 	"os"
 	"sync"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"k8s.io/klog"
 )
@@ -91,7 +94,7 @@ func (s *nonBlockingGRPCServer) serve(endpoint string, ids csi.IdentityServer, c
 	}
 
 	opts := []grpc.ServerOption{
-		grpc.UnaryInterceptor(logGRPC),
+		grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor),
 	}
 	server := grpc.NewServer(opts...)
 	s.server = server
@@ -105,6 +108,15 @@ func (s *nonBlockingGRPCServer) serve(endpoint string, ids csi.IdentityServer, c
 	if ns != nil {
 		csi.RegisterNodeServer(server, ns)
 	}
+
+	grpc_prometheus.EnableHandlingTimeHistogram()
+	grpc_prometheus.Register(server)
+	http.Handle("/metrics", promhttp.Handler())
+	go func() {
+		if err := http.ListenAndServe("0.0.0.0:8080", nil); err != nil {
+			klog.Fatalf("Unable to start a http server: %v", err)
+		}
+	}()
 
 	klog.Infof("Listening for connections on address: %#v", listener.Addr())
 
