@@ -25,6 +25,7 @@ import (
 
 	"github.com/ceph/ceph-csi/pkg/util"
 
+	rbdgo "github.com/ceph/go-ceph/rbd"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/pborman/uuid"
@@ -106,8 +107,6 @@ var (
 
 // createImage creates a new ceph image with provision and volume options.
 func createImage(pOpts *rbdVolume, volSz int64, cr *util.Credentials) error {
-	var output []byte
-
 	image := pOpts.RbdImageName
 	volSzMiB := fmt.Sprintf("%dM", volSz)
 
@@ -116,15 +115,12 @@ func createImage(pOpts *rbdVolume, volSz int64, cr *util.Credentials) error {
 	} else {
 		klog.V(4).Infof("rbd: create %s size %s format %s using mon %s, pool %s", image, volSzMiB, pOpts.ImageFormat, pOpts.Monitors, pOpts.Pool)
 	}
-	args := []string{"create", image, "--size", volSzMiB, "--pool", pOpts.Pool, "--id", cr.ID, "-m", pOpts.Monitors, "--keyfile=" + cr.KeyFile, "--image-format", pOpts.ImageFormat}
-	if pOpts.ImageFormat == rbdImageFormat2 {
-		args = append(args, "--image-feature", pOpts.ImageFeatures)
-	}
-	output, err := execCommand("rbd", args)
 
+	rbdImg, err := rbdgo.Create(cr.IOContext, image, uint64(volSz)*util.MiB, 22, rbdgo.RbdFeatureLayering)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create rbd image, command output: %s", string(output))
+		return fmt.Errorf("failed to create rbd image (%s): (%v)", image, err)
 	}
+	rbdImg.Close()
 
 	return nil
 }

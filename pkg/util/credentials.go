@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+
+	"github.com/ceph/go-ceph/rados"
 )
 
 const (
@@ -33,8 +35,10 @@ const (
 )
 
 type Credentials struct {
-	ID      string
-	KeyFile string
+	ID         string
+	KeyFile    string
+	Connection *rados.Conn
+	IOContext  *rados.IOContext
 }
 
 func storeKey(key string) (string, error) {
@@ -88,7 +92,62 @@ func newCredentialsFromSecret(idField, keyField string, secrets map[string]strin
 	return c, err
 }
 
+func (cr *Credentials) Connect(monitors string) error {
+	var err error
+
+	if cr.Connection != nil {
+		return nil
+	}
+
+	cr.Connection, err = rados.NewConn()
+	if err != nil {
+		return fmt.Errorf("error creating a new RADOS connection (%v)", err)
+	}
+
+	baseArgs := []string{
+		"-m", monitors,
+		"--id", cr.ID,
+		"--keyfile=" + cr.KeyFile,
+		"-c", "/etc/ceph/ceph.conf",
+	}
+
+	err = cr.Connection.ParseCmdLineArgs(baseArgs)
+	if err != nil {
+		return fmt.Errorf("error updating connection with args (%v)", err)
+	}
+
+	err = cr.Connection.Connect()
+	if err != nil {
+		return fmt.Errorf("error connecting to Ceph cluster (%v)", err)
+	}
+
+	return nil
+}
+
+func (cr *Credentials) OpenIOContext(poolname string) error {
+	if cr.IOContext != nil {
+		return nil
+	}
+
+	ioctx, err := cr.Connection.OpenIOContext(poolname)
+	if err != nil {
+		return fmt.Errorf("error creating IO context for pool (%s): (%v)", poolname, err)
+	}
+
+	cr.IOContext = ioctx
+
+	return nil
+}
+
 func (cr *Credentials) DeleteCredentials() {
+	if cr.IOContext != nil {
+		cr.IOContext.Destroy()
+	}
+
+	if cr.Connection != nil {
+		cr.Connection.Shutdown()
+	}
+
 	os.Remove(cr.KeyFile)
 }
 

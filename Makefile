@@ -51,7 +51,7 @@ func-test:
 .PHONY: cephcsi
 cephcsi:
 	if [ ! -d ./vendor ]; then dep ensure -vendor-only; fi
-	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '$(LDFLAGS) -extldflags "-static"' -o  _output/cephcsi ./cmd/
+	CGO_ENABLED=1 GOOS=linux go build -a -ldflags '$(LDFLAGS)' -o  _output/cephcsi ./cmd/
 
 image-cephcsi: cephcsi
 	cp _output/cephcsi deploy/cephcsi/image/cephcsi

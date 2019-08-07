@@ -37,6 +37,17 @@
   version = "v1.0.0"
 
 [[projects]]
+  branch = "master"
+  digest = "1:371dbf7f04fe7ddbcf65b88aef026278e21c9a7df810339bbe94abcf830e0627"
+  name = "github.com/ceph/go-ceph"
+  packages = [
+    "rados",
+    "rbd",
+  ]
+  pruneopts = "NUT"
+  revision = "e32f9f0f2e941422937c0a6c4f0a61b8f0c82995"
+
+[[projects]]
   digest = "1:7f21fa1f8ab9a529dba26a7e9cf20de217c307fa1d96cb599d3afd9e5c83e9d6"
   name = "github.com/container-storage-interface/spec"
   packages = ["lib/go/csi"]
@@ -1337,6 +1348,8 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
+    "github.com/ceph/go-ceph/rados",
+    "github.com/ceph/go-ceph/rbd",
     "github.com/container-storage-interface/spec/lib/go/csi",
     "github.com/golang/protobuf/ptypes",
     "github.com/golang/protobuf/ptypes/timestamp",
