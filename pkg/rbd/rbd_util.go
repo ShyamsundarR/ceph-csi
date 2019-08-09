@@ -28,6 +28,7 @@ import (
 
 	"github.com/ceph/ceph-csi/pkg/util"
 
+	rbdgo "github.com/ceph/go-ceph/rbd"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/pborman/uuid"
@@ -45,6 +46,12 @@ const (
 	rbdImageWatcherFactor    = 1.4
 	rbdImageWatcherSteps     = 10
 	rbdDefaultMounter        = "rbd"
+
+	// Output strings returned during invocation of "ceph rbd task add remove <imagespec>" when
+	// command is not supported by ceph manager. Used to check errors and recover when the command
+	// is unsupported.
+	rbdTaskRemoveCmdInvalidString1 = "no valid command found"
+	rbdTaskRemoveCmdInvalidString2 = "Error EINVAL: invalid command"
 )
 
 // rbdVolume represents a CSI volume and its RBD image specifics
@@ -109,8 +116,6 @@ var (
 
 // createImage creates a new ceph image with provision and volume options.
 func createImage(pOpts *rbdVolume, volSz int64, cr *util.Credentials) error {
-	var output []byte
-
 	image := pOpts.RbdImageName
 	volSzMiB := fmt.Sprintf("%dM", volSz)
 
@@ -119,15 +124,12 @@ func createImage(pOpts *rbdVolume, volSz int64, cr *util.Credentials) error {
 	} else {
 		klog.V(4).Infof("rbd: create %s size %s format %s using mon %s, pool %s", image, volSzMiB, pOpts.ImageFormat, pOpts.Monitors, pOpts.Pool)
 	}
-	args := []string{"create", image, "--size", volSzMiB, "--pool", pOpts.Pool, "--id", cr.ID, "-m", pOpts.Monitors, "--keyfile=" + cr.KeyFile, "--image-format", pOpts.ImageFormat}
-	if pOpts.ImageFormat == rbdImageFormat2 {
-		args = append(args, "--image-feature", pOpts.ImageFeatures)
-	}
-	output, err := execCommand("rbd", args)
 
+	rbdImg, err := rbdgo.Create(cr.IOContext, image, uint64(volSz)*util.MiB, 22, rbdgo.RbdFeatureLayering)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create rbd image, command output: %s", string(output))
+		return fmt.Errorf("failed to create rbd image (%s): (%v)", image, err)
 	}
+	rbdImg.Close()
 
 	return nil
 }
@@ -166,6 +168,31 @@ func rbdStatus(pOpts *rbdVolume, cr *util.Credentials) (bool, string, error) {
 	return false, output, nil
 }
 
+// rbdManagerTaskDelete adds a ceph manager task to delete an rbd image, thus deleting
+// it asynchronously. If command is not found returns a bool set to false
+func rbdManagerTaskDeleteImage(pOpts *rbdVolume, cr *util.Credentials) (bool, error) {
+	var output []byte
+
+	args := []string{"rbd", "task", "add", "remove",
+		pOpts.Pool + "/" + pOpts.RbdImageName,
+		"--id", cr.ID,
+		"--keyfile=" + cr.KeyFile,
+		"-m", pOpts.Monitors,
+	}
+
+	output, err := execCommand("ceph", args)
+	if err != nil {
+		if strings.Contains(string(output), rbdTaskRemoveCmdInvalidString1) &&
+			strings.Contains(string(output), rbdTaskRemoveCmdInvalidString2) {
+			klog.Infof("cluster with cluster ID (%s) does not support Ceph manager based rbd image"+
+				" deletion (minimum ceph version required is v14.2.3)", pOpts.ClusterID)
+			return false, err
+		}
+	}
+
+	return true, err
+}
+
 // deleteImage deletes a ceph image with provision and volume options.
 func deleteImage(pOpts *rbdVolume, cr *util.Credentials) error {
 	var output []byte
@@ -181,9 +208,16 @@ func deleteImage(pOpts *rbdVolume, cr *util.Credentials) error {
 	}
 
 	klog.V(4).Infof("rbd: rm %s using mon %s, pool %s", image, pOpts.Monitors, pOpts.Pool)
-	args := []string{"rm", image, "--pool", pOpts.Pool, "--id", cr.ID, "-m", pOpts.Monitors,
-		"--keyfile=" + cr.KeyFile}
-	output, err = execCommand("rbd", args)
+
+	// attempt to use Ceph manager based deletion support if available
+	rbdCephMgrSupported, err := rbdManagerTaskDeleteImage(pOpts, cr)
+	if !rbdCephMgrSupported {
+		// attempt older style deletion
+		args := []string{"rm", image, "--pool", pOpts.Pool, "--id", cr.ID, "-m", pOpts.Monitors,
+			"--keyfile=" + cr.KeyFile}
+		output, err = execCommand("rbd", args)
+	}
+
 	if err != nil {
 		klog.Errorf("failed to delete rbd image: %v, command output: %s", err, string(output))
 	}

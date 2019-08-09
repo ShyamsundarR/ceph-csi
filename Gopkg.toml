@@ -68,3 +68,11 @@
 [[prune.project]]
   name = "github.com/kubernetes-csi/external-snapshotter"
   non-go = false
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/ceph/go-ceph"
+
+[[constraint]]
+  name = "github.com/grpc-ecosystem/go-grpc-prometheus"
+  version = "1.2.0"

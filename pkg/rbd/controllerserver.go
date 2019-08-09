@@ -126,6 +126,16 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	idLk := volumeNameLocker.Lock(req.GetName())
 	defer volumeNameLocker.Unlock(idLk, req.GetName())
 
+	err = cr.Connect(rbdVol.Monitors)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	err = cr.OpenIOContext(rbdVol.Pool)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
 	found, err := checkVolExists(rbdVol, cr)
 	if err != nil {
 		if _, ok := err.(ErrVolNameConflict); ok {
@@ -157,7 +167,7 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		}
 	}()
 
-	err = cs.createBackingImage(rbdVol, req, util.RoundUpToMiB(rbdVol.VolSize))
+	err = cs.createBackingImage(rbdVol, req, cr, util.RoundUpToMiB(rbdVol.VolSize))
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +181,7 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	}, nil
 }
 
-func (cs *ControllerServer) createBackingImage(rbdVol *rbdVolume, req *csi.CreateVolumeRequest, volSizeMiB int64) error {
+func (cs *ControllerServer) createBackingImage(rbdVol *rbdVolume, req *csi.CreateVolumeRequest, cr *util.Credentials, volSizeMiB int64) error {
 	var err error
 
 	// if VolumeContentSource is not nil, this request is for snapshot
@@ -180,12 +190,6 @@ func (cs *ControllerServer) createBackingImage(rbdVol *rbdVolume, req *csi.Creat
 			return err
 		}
 	} else {
-		cr, err := util.NewUserCredentials(req.GetSecrets())
-		if err != nil {
-			return status.Error(codes.Internal, err.Error())
-		}
-		defer cr.DeleteCredentials()
-
 		err = createImage(rbdVol, volSizeMiB, cr)
 		if err != nil {
 			klog.Warningf("failed to create volume: %v", err)
